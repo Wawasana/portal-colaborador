@@ -35,9 +35,10 @@ def migrate(engine):
             fecha_inicio DATE NOT NULL, fecha_fin DATE NOT NULL, dias INT NOT NULL,
             comentarios TEXT, estado VARCHAR(20) NOT NULL DEFAULT 'Pendiente',
             creado_en TIMESTAMP NOT NULL DEFAULT NOW(), actualizado_en TIMESTAMP NOT NULL DEFAULT NOW())'''))
+        c.execute(text('ALTER TABLE solicitudes DROP CONSTRAINT IF EXISTS solicitudes_estado_ck'))
         for name, clause in (
             ('solicitudes_usuario_fk', 'FOREIGN KEY (codigo) REFERENCES usuarios(codigo)'),
-            ('solicitudes_estado_ck', "CHECK (estado IN ('Pendiente','Aprobado','Rechazado'))"),
+            ('solicitudes_estado_ck', "CHECK (estado IN ('Pendiente','Aprobado','Rechazado','Cancelada','Disfrutada'))"),
             ('solicitudes_fechas_ck', 'CHECK (fecha_fin >= fecha_inicio AND dias = fecha_fin - fecha_inicio + 1 AND dias BETWEEN 1 AND 30)'),
             ('solicitudes_comentarios_ck', 'CHECK (length(comentarios) <= 300)'),
         ):
@@ -56,6 +57,32 @@ def migrate(engine):
         c.execute(text('''CREATE TABLE IF NOT EXISTS login_intentos (
             codigo VARCHAR(64) PRIMARY KEY, fallos INT NOT NULL DEFAULT 0,
             ventana TIMESTAMPTZ NOT NULL DEFAULT NOW(), bloqueado_hasta TIMESTAMPTZ)'''))
+
+        c.execute(text("""CREATE TABLE IF NOT EXISTS periodos_vacaciones (
+            id SERIAL PRIMARY KEY, codigo VARCHAR(50) NOT NULL REFERENCES usuarios(codigo),
+            inicio DATE NOT NULL, fin DATE NOT NULL, habilita DATE NOT NULL,
+            adelanto_desde DATE NOT NULL, limite DATE NOT NULL,
+            record_validado BOOLEAN NOT NULL DEFAULT FALSE,
+            validacion_referencia VARCHAR(300), validado_por VARCHAR(50), validado_en TIMESTAMPTZ,
+            UNIQUE(codigo,inicio), UNIQUE(id,codigo),
+            CHECK (inicio<=fin AND fin<habilita AND habilita<limite))"""))
+        c.execute(text('ALTER TABLE solicitudes ADD COLUMN IF NOT EXISTS periodo_id INT'))
+        c.execute(text("ALTER TABLE solicitudes ADD COLUMN IF NOT EXISTS bloque VARCHAR(20) NOT NULL DEFAULT 'Historico'"))
+        c.execute(text("ALTER TABLE solicitudes ADD COLUMN IF NOT EXISTS modalidad VARCHAR(20) NOT NULL DEFAULT 'Historica'"))
+        c.execute(text("ALTER TABLE solicitudes ADD COLUMN IF NOT EXISTS acuerdo TEXT NOT NULL DEFAULT ''"))
+        c.execute(text('ALTER TABLE solicitudes ADD COLUMN IF NOT EXISTS acepta_acuerdo BOOLEAN NOT NULL DEFAULT FALSE'))
+        c.execute(text('ALTER TABLE solicitudes ADD COLUMN IF NOT EXISTS conciliacion_referencia VARCHAR(300)'))
+        c.execute(text("""DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='solicitudes_periodo_fk' AND conrelid='solicitudes'::regclass) THEN
+                ALTER TABLE solicitudes ADD CONSTRAINT solicitudes_periodo_fk
+                    FOREIGN KEY (periodo_id,codigo) REFERENCES periodos_vacaciones(id,codigo);
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='solicitudes_bloque_ck' AND conrelid='solicitudes'::regclass) THEN
+                ALTER TABLE solicitudes ADD CONSTRAINT solicitudes_bloque_ck CHECK (bloque IN ('Historico','Completo','Principal','Flexible'));
+                ALTER TABLE solicitudes ADD CONSTRAINT solicitudes_modalidad_ck CHECK (modalidad IN ('Historica','Anual','Adelanto'));
+                ALTER TABLE solicitudes ADD CONSTRAINT solicitudes_acuerdo_ck CHECK (length(acuerdo)<=500);
+            END IF;
+        END $$"""))
 
 
 def sync_users(engine, users):
