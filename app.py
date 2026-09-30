@@ -86,8 +86,10 @@ def admin(engine,session):
     st.title('⚙️ Panel de Administración')
     rows = db.read(engine,'SELECT * FROM solicitudes ORDER BY creado_en DESC LIMIT 1000')
     df = pd.DataFrame(rows)
-    st.caption('Hasta 1000 solicitudes recientes. Solo se resuelven solicitudes pendientes.')
+    st.caption('Hasta 1000 solicitudes recientes. Horarios de Perú (UTC−5). Solo se resuelven solicitudes pendientes.')
     if not df.empty:
+        for column in ('creado_en', 'actualizado_en'):
+            df[column] = pd.to_datetime(df[column], utc=True).dt.tz_convert('America/Lima').dt.tz_localize(None)
         a,b = st.columns(2)
         month = a.selectbox('Mes',['Todos']+sorted(df.mes_inicio.unique().tolist()))
         year = b.selectbox('Año',['Todos']+sorted(df.anio_inicio.unique().tolist()))
@@ -97,7 +99,10 @@ def admin(engine,session):
         if year!='Todos':
             visible = visible[visible.anio_inicio==year]
         edited = st.data_editor(visible,hide_index=True,disabled=[c for c in df.columns if c!='estado'],
-            column_config={'estado':st.column_config.SelectboxColumn('Estado',options=['Pendiente','Aprobado','Rechazado'],required=True)})
+            column_config={
+                'estado':st.column_config.SelectboxColumn('Estado',options=['Pendiente','Aprobado','Rechazado'],required=True),
+                'creado_en':st.column_config.DatetimeColumn('Fecha de creación',format='DD/MM/YYYY HH:mm:ss'),
+                'actualizado_en':st.column_config.DatetimeColumn('Última actualización',format='DD/MM/YYYY HH:mm:ss')})
         if st.button('Guardar cambios de estado'):
             count = 0
             for row in edited.to_dict('records'):
