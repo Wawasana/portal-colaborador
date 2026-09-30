@@ -2,7 +2,7 @@
 
 ## Resultado
 
-La nueva versión reemplaza el prototipo por una aplicación modular con PostgreSQL. El código está preparado para una validación de integración; no se declara listo para producción ni desplegado. No se ha accedido a la BD real, a Secrets, a los logs ni a la configuración efectiva de Streamlit.
+La nueva versión reemplaza el prototipo por una aplicación modular con PostgreSQL. La batería automatizada de 13 pruebas pasó en GitHub Actions con PostgreSQL 16 y Python 3.12; todavía no se declara listo para producción ni desplegado. No se ha accedido a la BD real, a Secrets, a los logs ni a la configuración efectiva de Streamlit.
 
 GitHub confirmado: repositorio público Wawasana/portal-colaborador, main en b752cac47e65000ab0dd3f8b70ce45e6d0bc8dc6; la raíz contiene solamente app.py. Esto confirma el código del repositorio, pero no demuestra por sí solo qué revisión está ejecutando Streamlit.
 
@@ -10,17 +10,17 @@ GitHub confirmado: repositorio público Wawasana/portal-colaborador, main en b75
 
 | Problema | Corrección | Estado de verificación |
 |---|---|---|
-| Tablas creadas después del login | Migración antes de autenticar, transacción y bloqueo de inicialización | Compilación; prueba de BD pendiente |
+| Tablas creadas después del login | Migración antes de autenticar, transacción y bloqueo de inicialización | Compilación; batería de integración aprobada en CI |
 | SHA-256 con salt fijo | Argon2id, salts aleatorios y rehash; hashes antiguos requieren reset | Prueba local aprobada |
 | Credenciales simuladas en código | No se incorporan a la versión nueva; usuarios desde Secrets | Revisión estática |
-| Contador de login por navegador | Contadores y bloqueo persistentes en PostgreSQL, límite global | Prueba de BD pendiente |
-| Saldo fijo e independiente de solicitudes | Cupo explícito de RR. HH.; reserva de pendientes/aprobadas | Prueba de BD pendiente |
-| Solapamientos y sobreconsumo concurrente | Bloqueo de fila del empleado; validar e insertar en una transacción | Prueba concurrente pendiente |
-| Permisos dependientes de pantalla | Validación de usuario activo, revisión y administrador en servicios | Prueba de BD pendiente |
-| Cambios de estado sobrescriben decisiones concurrentes | Solo pendientes; se comprueba estado anterior bajo bloqueo | Prueba de BD pendiente |
-| Secrets no sincronizan datos | Actualización de perfil/rol/activo; contraseña mediante cred_revision creciente | Prueba de BD pendiente |
-| Falta integridad de BD | FK, CHECKs de estados/fechas/días/comentarios; preflight de solapamientos | Prueba de BD pendiente |
-| Auditoría silenciosa / separada del guardado | Auditoría dentro de la transacción; si falla, no se confirma el cambio | Revisión estática; prueba de BD pendiente |
+| Contador de login por navegador | Contadores y bloqueo persistentes en PostgreSQL, límite global | Batería de integración aprobada en CI |
+| Saldo fijo e independiente de solicitudes | Cupo explícito de RR. HH.; reserva de pendientes/aprobadas | Batería de integración aprobada en CI |
+| Solapamientos y sobreconsumo concurrente | Bloqueo de fila del empleado; validar e insertar en una transacción | Prueba concurrente aprobada en CI |
+| Permisos dependientes de pantalla | Validación de usuario activo, revisión y administrador en servicios | Batería de integración aprobada en CI |
+| Cambios de estado sobrescriben decisiones concurrentes | Solo pendientes; se comprueba estado anterior bajo bloqueo | Batería de integración aprobada en CI |
+| Secrets no sincronizan datos | Actualización de perfil/rol/activo; contraseña mediante cred_revision creciente | Batería de integración aprobada en CI |
+| Falta integridad de BD | FK, CHECKs de estados/fechas/días/comentarios; preflight de solapamientos | Batería de integración aprobada en CI |
+| Auditoría silenciosa / separada del guardado | Auditoría dentro de la transacción; si falla, no se confirma el cambio | Revisión estática; batería de integración aprobada en CI |
 | Antigüedad aproximada | relativedelta y fecha local de Lima | Compilación |
 | ERP adivina campos y concede saldo de respaldo | Mapa explícito y validación de código/tipos; lectura informativa | Prueba local aprobada |
 | ERP expone errores HTTP / redirecciones con token | Errores genéricos; HTTPS; sin redirecciones; timeout | Prueba local parcial y revisión estática |
@@ -28,10 +28,11 @@ GitHub confirmado: repositorio público Wawasana/portal-colaborador, main en b75
 ## Pruebas realizadas
 
 - Python 3.12: compilación correcta de los módulos.
-- pytest: **4 aprobadas, 9 omitidas expresamente** porque no hay PostgreSQL de pruebas accesible en este entorno.
+- Entorno local: **4 aprobadas, 9 omitidas expresamente**, sin PostgreSQL local.
+- GitHub Actions: **13 aprobadas, 0 omitidas**, con PostgreSQL 16; ejecución https://github.com/Wawasana/portal-colaborador/actions/runs/36730021531, commit 803eed8ce933351a663b54403b5e193655ea6667.
 - Aprobadas: hashes diferentes para igual contraseña, aceptación/rechazo de password, rechazo de SHA-256 legado incluso con el password dummy; validación de fechas; validación del esquema ERP; arranque de Streamlit sin Secrets con error controlado.
-- Las 9 pruebas pendientes requieren una BD desechable: login inicial/cambio de contraseña/revocación; bloqueo persistente; permisos/saldo/solapamiento; concurrencia; constraints; migración repetible; rechazo libera saldo; cuenta inactiva; login y pantalla de empleado en Streamlit.
-- Se incluye GitHub Actions con PostgreSQL 16 para ejecutar toda la batería cuando se autorice publicar el código. La publicación fue autorizada explícitamente por el usuario; el resultado de CI se comprobará en el PR.
+- Las 9 pruebas de integración ejecutadas y aprobadas en CI cubren: login inicial/cambio de contraseña/revocación; bloqueo persistente; permisos/saldo/solapamiento; concurrencia; constraints; migración repetible; rechazo libera saldo; cuenta inactiva; login y pantalla de empleado en Streamlit.
+- Publicación autorizada explícitamente por el usuario; PR https://github.com/Wawasana/portal-colaborador/pull/1. CI no prueba conectividad TLS con producción, contrato ERP real ni migración de datos reales.
 - No se realizaron pruebas contra producción ni se usaron credenciales reales.
 
 ## Riesgos y trabajo pendiente
@@ -49,7 +50,7 @@ GitHub confirmado: repositorio público Wawasana/portal-colaborador, main en b75
 
 ## Recomendación
 
-Conservar Streamlit y desplegar primero una instancia de pruebas con BD independiente. Ejecutar toda la batería, revisar la migración sobre una copia de datos y validar ambos roles. Después publicar la versión validada y rotar credenciales del prototipo. El principal pendiente ya no es escribir la app: es verificarla con infraestructura y reglas laborales reales.
+Conservar Streamlit y desplegar primero una instancia de pruebas con BD independiente. La batería automatizada pasó; revisar ahora la migración sobre una copia de datos reales y validar ambos roles en el despliegue configurado. Después publicar la versión validada y rotar credenciales del prototipo. El principal pendiente ya no es escribir la app: es verificarla con infraestructura y reglas laborales reales.
 
 Referencia técnica consultada para la API de Argon2id/rehash: https://argon2-cffi.readthedocs.io/en/stable/api.html
 Referencia de pruebas de Streamlit: https://docs.streamlit.io/develop/api-reference/app-testing/st.testing.v1.apptest
