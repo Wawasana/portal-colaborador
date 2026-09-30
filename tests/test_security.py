@@ -298,3 +298,46 @@ def test_erp_transport_errors():
     with patch('erp_client.requests.get',side_effect=requests.Timeout('secret-example')):
         with pytest.raises(ERPError) as error: obtener_colaborador('EMP',cfg)
         assert 'secret-example' not in str(error.value)
+
+
+@pytest.mark.parametrize('start,current,earned,next_date',[
+    (date(2026,1,1),date(2026,6,30),0,date(2026,7,1)),
+    (date(2026,1,1),date(2026,7,1),15,date(2027,1,1)),
+    (date(2026,1,1),date(2027,1,1),30,date(2027,7,1)),
+    (date(2026,8,31),date(2027,2,27),0,date(2027,2,28)),
+    (date(2026,8,31),date(2027,2,28),15,date(2027,8,31)),
+    (date(2024,2,29),date(2025,2,28),30,date(2025,8,29)),
+    (date(2027,1,1),date(2026,9,30),0,date(2027,7,1)),
+    (None,date(2026,9,30),None,None),
+])
+def test_six_month_anniversaries(start,current,earned,next_date):
+    from service import entitlement
+    assert entitlement(start,current)==(earned,next_date)
+
+
+def test_automatic_balance_and_reservations(engine):
+    from unittest.mock import patch
+    import service
+    emp,adm=identities(engine)
+    with engine.begin() as c:
+        c.execute(text("UPDATE usuarios SET fecha_ingreso='2026-01-01',cupo_vacaciones=999 WHERE codigo='EMP'"))
+    with patch.object(service,'today',return_value=date(2026,7,1)):
+        ident=request_vacation(engine,emp,date(2026,7,2),date(2026,7,16),'15 días')
+        with pytest.raises(ValueError):
+            request_vacation(engine,emp,date(2026,8,1),date(2026,8,1),'Sin saldo')
+        change_status(engine,adm,ident,'Pendiente','Aprobado')
+        with engine.connect() as c:
+            u=service.actor(c,emp)
+            assert service.remaining(c,u)==0
+            assert service.vacation_summary(c,u,date(2027,1,1))['disponibles']==15
+    with patch.object(service,'today',return_value=date(2027,1,1)):
+        ident=request_vacation(engine,emp,date(2027,1,2),date(2027,1,6),'Reserva')
+        with engine.connect() as c:
+            assert service.remaining(c,service.actor(c,emp))==10
+        change_status(engine,adm,ident,'Pendiente','Rechazado')
+        with engine.connect() as c:
+            assert service.remaining(c,service.actor(c,emp))==15
+    # Renewal/profile synchronization retaining original start does not reset accrual.
+    sync_users(engine,{'EMP':{'nombre':'Renewed','fecha_ingreso':'2026-01-01','cred_revision':1}})
+    with engine.connect() as c:
+        assert service.vacation_summary(c,service.actor(c,emp),date(2027,1,1))['disponibles']==15

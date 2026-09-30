@@ -113,21 +113,21 @@ def admin(engine,session):
                 st.rerun()
     else:
         st.info('Sin solicitudes registradas.')
-    st.subheader('Cupo de vacaciones')
-    st.caption('Cupo acumulado administrado por RR. HH.; se descuentan todas las solicitudes pendientes y aprobadas del portal. No es un saldo anual automático ni el saldo del ERP.')
-    users = db.read(engine,'SELECT codigo,nombre,cupo_vacaciones FROM usuarios WHERE activo ORDER BY codigo')
-    if users:
-        st.dataframe(pd.DataFrame(users),hide_index=True)
-        with st.form('budget'):
-            code = st.selectbox('Colaborador',[u['codigo'] for u in users])
-            budget = st.number_input('Nuevo cupo acumulado (días calendario)',min_value=0,max_value=10000,step=1)
-            if st.form_submit_button('Registrar cupo'):
-                try:
-                    service.set_budget(engine,session,code,int(budget))
-                    st.session_state.notice = 'Cupo actualizado.'
-                    st.rerun()
-                except ValueError as exc:
-                    st.error(str(exc))
+    st.subheader('Saldo de vacaciones por colaborador')
+    st.caption('15 días por cada 6 meses completos desde la fecha de ingreso continuo. Las solicitudes aprobadas y pendientes se descuentan una sola vez. Sin conexión al saldo oficial del ERP.')
+    users = db.read(engine,'SELECT * FROM usuarios WHERE activo AND NOT es_admin ORDER BY codigo')
+    balances = []
+    with engine.connect() as c:
+        for u in users:
+            v = service.vacation_summary(c,u)
+            balances.append({'Código':u['codigo'], 'Nombre':u['nombre'],
+                'Ingreso continuo':u['fecha_ingreso'], 'Días generados':v['generados'],
+                'Días aprobados':v['aprobados'], 'Días pendientes':v['pendientes'],
+                'Días disponibles':v['disponibles'], 'Próximos 15 días':v['proxima_fecha'],
+                'Cálculo':'Manual anterior: falta fecha de ingreso' if v['legacy'] else ('Automático' if u['fecha_ingreso'] else 'Falta fecha de ingreso')})
+    if balances:
+        st.dataframe(pd.DataFrame(balances),hide_index=True)
+    st.info('La fecha de ingreso continuo se configura actualmente en Secrets (fecha_ingreso). Una renovación sin interrupción conserva esa fecha. Reinicia la aplicación después de corregirla. Los saldos se recalculan al actualizar la página.')
 
 
 def employee(engine,session,user):
@@ -146,9 +146,16 @@ def employee(engine,session,user):
         delta = relativedelta(service.today(),profile['fecha_ingreso'])
         a.write(f'Antigüedad: {delta.years} años, {delta.months} meses y {delta.days} días')
     with engine.connect() as c:
-        balance = service.remaining(c,user)
+        summary = service.vacation_summary(c,user)
+        balance = summary['disponibles']
     b.metric('Días disponibles en el portal','Sin registrar' if balance is None else balance)
     b.caption('Se descuentan solicitudes pendientes y aprobadas. Días calendario.')
+    if summary['legacy']:
+        b.warning('Saldo manual anterior: RR. HH. debe registrar la fecha de ingreso continuo para activar el cálculo automático.')
+    else:
+        b.caption(f"Días generados: {summary['generados'] if summary['generados'] is not None else 'Sin fecha de ingreso'} · Aprobados: {summary['aprobados']} · Pendientes: {summary['pendientes']}")
+        if summary['proxima_fecha']:
+            b.caption(f"Próximos 15 días: {summary['proxima_fecha'].strftime('%d/%m/%Y')}")
     if data and data.get('dias_vacaciones') is not None:
         b.caption(f'Saldo informativo ERP: {data["dias_vacaciones"]}. No sincronizado con las aprobaciones del portal.')
     request,history = st.tabs(['✈️ Solicitar Vacaciones','📋 Mis Solicitudes'])

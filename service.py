@@ -2,6 +2,7 @@
 import hashlib
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+from dateutil.relativedelta import relativedelta
 from sqlalchemy import text
 from auth import verify_password, DUMMY_HASH, PH
 from database import audit
@@ -52,11 +53,37 @@ def actor(c, session, admin=False):
     return u
 
 
+def entitlement(start, now=None):
+    """15 days for each completed six-month anniversary; no future credit."""
+    current = now or today()
+    if start is None:
+        return None, None
+    if start > current:
+        return 0, start + relativedelta(months=6)
+    months = (current.year-start.year)*12 + current.month-start.month
+    blocks = months // 6
+    if start + relativedelta(months=blocks*6) > current:
+        blocks -= 1
+    return blocks*15, start + relativedelta(months=(blocks+1)*6)
+
+
+def vacation_summary(c, user, now=None):
+    generated, next_date = entitlement(user['fecha_ingreso'], now)
+    # Preserve historical manual accounts without a start date during migration.
+    legacy = user['fecha_ingreso'] is None and user['cupo_vacaciones'] is not None
+    if legacy:
+        generated = user['cupo_vacaciones']
+    totals = c.execute(text("""SELECT
+        COALESCE(SUM(dias) FILTER (WHERE estado='Aprobado'),0) AS approved,
+        COALESCE(SUM(dias) FILTER (WHERE estado='Pendiente'),0) AS pending
+        FROM solicitudes WHERE codigo=:c"""), {'c':user['codigo']}).mappings().one()
+    return {'generados':generated, 'aprobados':totals['approved'],
+            'pendientes':totals['pending'], 'disponibles':None if generated is None else generated-totals['approved']-totals['pending'],
+            'proxima_fecha':next_date, 'legacy':legacy}
+
+
 def remaining(c, user):
-    if user['cupo_vacaciones'] is None:
-        return None
-    reserved = c.execute(text("SELECT COALESCE(SUM(dias),0) FROM solicitudes WHERE codigo=:c AND estado IN ('Pendiente','Aprobado')"), {'c':user['codigo']}).scalar_one()
-    return user['cupo_vacaciones'] - reserved
+    return vacation_summary(c, user)['disponibles']
 
 
 def validate_dates(start, end, comments, now=None):
