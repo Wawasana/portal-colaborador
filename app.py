@@ -72,6 +72,8 @@ def main():
     except ValueError:
         logout()
     st.session_state.last_activity = now
+    if 'notice' in st.session_state:
+        st.success(st.session_state.pop('notice'))
     if st.button('🚪 Cerrar Sesión'):
         logout()
     if user['es_admin']:
@@ -106,7 +108,9 @@ def admin(engine,session):
                         count+=1
                     except ValueError as exc:
                         st.error(str(exc))
-            st.success(f'{count} cambio(s) guardados. Actualiza la vista para consultar el resultado.')
+            if count:
+                st.session_state.notice = f'{count} cambio(s) guardados.'
+                st.rerun()
     else:
         st.info('Sin solicitudes registradas.')
     st.subheader('Cupo de vacaciones')
@@ -120,7 +124,8 @@ def admin(engine,session):
             if st.form_submit_button('Registrar cupo'):
                 try:
                     service.set_budget(engine,session,code,int(budget))
-                    st.success('Cupo actualizado.')
+                    st.session_state.notice = 'Cupo actualizado.'
+                    st.rerun()
                 except ValueError as exc:
                     st.error(str(exc))
 
@@ -155,7 +160,8 @@ def employee(engine,session,user):
             if st.form_submit_button('Enviar solicitud',disabled=balance is None):
                 try:
                     ident = service.request_vacation(engine,session,start,end,comment)
-                    st.success(f'Solicitud #{ident} enviada a RR. HH.')
+                    st.session_state.notice = f'Solicitud #{ident} enviada a RR. HH.'
+                    st.rerun()
                 except ValueError as exc:
                     st.error(str(exc))
     with history:
