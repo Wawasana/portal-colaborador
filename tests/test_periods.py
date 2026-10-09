@@ -4,7 +4,7 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy import text
 from database import read, migrate
-from periods import annual_periods, validate_block
+from periods import annual_periods, capacity, validate_block, validate_historical_block
 import service
 from test_security import engine, identities
 
@@ -30,18 +30,46 @@ def test_period_boundaries(start,now,count,anniversary):
 
 
 @pytest.mark.parametrize('block,days,existing,allowed',[
-    ('Principal',15,[],True), ('Principal',7,[],True),
-    ('Principal',8,[{'bloque':'Principal','dias':7}],True),
+    ('Principal',15,[],True), ('Principal',7,[],False),
+    ('Principal',8,[{'bloque':'Principal','dias':7}],False),
     ('Principal',7,[{'bloque':'Principal','dias':7}],False),
-    ('Principal',1,[],False),('Flexible',1,[],True),
+    ('Principal',1,[],False),('Flexible',1,[],False),
     ('Flexible',5,[{'bloque':'Flexible','dias':11}],False),
     ('Completo',30,[],True),('Completo',29,[],False),
     ('Completo',30,[{'bloque':'Flexible','dias':1}],False),
+    ('Flexible',15,[{'bloque':'Principal','dias':15}],True),
+    ('Flexible',15,[{'bloque':'Flexible','dias':15}],False),
+    ('Principal',15,[{'bloque':'Principal','dias':15}],False),
+    ('Principal',15,[{'bloque':'Completo','dias':30}],False),
+    ('Principal',15,[{'bloque':'Flexible','dias':11}],False),
+    ('Flexible',15,[{'bloque':'Principal','dias':15},{'bloque':'Flexible','dias':15}],False),
 ])
 def test_fraccionamiento(block,days,existing,allowed):
     if allowed: validate_block(block,days,existing)
     else:
         with pytest.raises(ValueError): validate_block(block,days,existing)
+
+
+def test_only_15_or_30_and_historical_exception():
+    for days in range(1,31):
+        for block in ('Principal','Flexible','Completo'):
+            if days == (30 if block=='Completo' else 15):
+                validate_block(block,days,[])
+            else:
+                with pytest.raises(ValueError): validate_block(block,days,[])
+    validate_historical_block('Flexible',11,[])
+    with pytest.raises(ValueError): validate_block('Flexible',11,[])
+
+
+def test_six_month_advance_and_anniversary_capacity():
+    p=annual_periods(date(2026,1,1),date(2026,7,1))[0]
+    p['record_validado']=False
+    assert capacity(p,date(2026,6,30))==0
+    assert capacity(p,date(2026,7,1))==15
+    assert capacity(p,date(2026,12,31))==15
+    assert capacity(p,date(2027,1,1))==0
+    p['record_validado']=True
+    assert capacity(p,date(2027,1,1))==30
 
 
 @pytest.fixture
@@ -107,6 +135,11 @@ def test_advance_15_then_annual_15(engine):
         assert summary(engine,emp)['actual']==15
         assert summary(engine,emp)['disfrutados']==15
         assert len(summary(engine,emp)['periodos'])==2
+        second=request(engine,emp,p,15,'Flexible',date(2027,1,2))
+        approve(engine,admin,second)
+        assert summary(engine,emp)['actual']==0
+        assert summary(engine,emp)['aprobados']==15
+        with pytest.raises(ValueError): request(engine,emp,p,15,'Flexible',date(2027,2,1))
 
 
 def test_entire_year_30_and_permission(setup):
@@ -120,11 +153,13 @@ def test_entire_year_30_and_permission(setup):
 
 def test_block_rules_are_enforced_in_server(setup):
     e,emp,admin,ps=setup
-    request(e,emp,ps[0],7,'Principal')
-    with pytest.raises(ValueError): request(e,emp,ps[0],7,'Principal',date(2026,11,1))
-    request(e,emp,ps[0],8,'Principal',date(2026,11,1))
-    request(e,emp,ps[0],15,'Flexible',date(2026,12,1))
+    for days in (1,7,8,11,14,16,29):
+        with pytest.raises(ValueError): request(e,emp,ps[0],days,'Principal')
+    request(e,emp,ps[0],15,'Principal')
+    with pytest.raises(ValueError): request(e,emp,ps[0],15,'Principal',date(2026,11,1))
+    request(e,emp,ps[0],15,'Flexible',date(2026,11,1))
     assert summary(e,emp)['actual']==0
+    with pytest.raises(ValueError): request(e,emp,ps[0],15,'Flexible',date(2026,12,1))
 
 
 def test_overlap_and_concurrent_exhaustion(setup):
@@ -153,6 +188,8 @@ def test_historical_preservation_and_reconciliation(setup):
     service.assign_historical(e,admin,id,ps[0]['id'],'Flexible','Validación del historial anterior')
     assert summary(e,emp)['actual']==19
     assert read(e,'SELECT estado FROM solicitudes')[0]['estado']=='Aprobado'
+    assert read(e,'SELECT dias,fecha_inicio,fecha_fin FROM solicitudes')[0]=={'dias':11,'fecha_inicio':date(2026,9,30),'fecha_fin':date(2026,10,10)}
+    with pytest.raises(ValueError): request(e,emp,ps[0],15,'Principal',date(2026,11,1))
     with pytest.raises(ValueError): service.assign_historical(e,admin,id,ps[1]['id'],'Flexible','No reasignar')
 
 
@@ -162,6 +199,16 @@ def test_record_required_and_no_advance_future_credit(setup):
     with pytest.raises(ValueError): request(e,emp,ps[0])
     with pytest.raises(ValueError): request(e,emp,ps[1],30,'Completo')
     with pytest.raises(ValueError): service.validate_record(e,admin,ps[1]['id'],'Aún no cumplió el año')
+
+
+def test_approval_rechecks_policy_for_nonhistorical_requests(setup):
+    e,emp,admin,ps=setup
+    ident=request(e,emp,ps[0])
+    service.register_agreement(e,admin,ident,'Acuerdo firmado registrado')
+    with e.begin() as c:
+        c.execute(text("UPDATE solicitudes SET dias=7,fecha_fin=fecha_inicio+6 WHERE id=:id"),{'id':ident})
+    with pytest.raises(ValueError): service.change_status(e,admin,ident,'Pendiente','Aprobado')
+    assert read(e,'SELECT estado FROM solicitudes WHERE id=:id',{'id':ident})[0]['estado']=='Pendiente'
 
 
 def test_identity_and_written_acceptance(setup):

@@ -22,8 +22,9 @@ def test_passwords():
 
 def test_dates():
     now=date(2026,1,1)
-    assert validate_dates(now,now,'',now)==1
-    for start,end in [(now-timedelta(days=1),now),(now,now-timedelta(days=1)),(now,now+timedelta(days=30))]:
+    assert validate_dates(now,now+timedelta(days=14),'',now)==15
+    assert validate_dates(now,now+timedelta(days=29),'',now)==30
+    for start,end in [(now-timedelta(days=1),now),(now,now-timedelta(days=1)),(now,now+timedelta(days=30)),(now,now),(now,now+timedelta(days=10)),(now,now+timedelta(days=15))]:
         with pytest.raises(ValueError): validate_dates(start,end,'',now)
 
 

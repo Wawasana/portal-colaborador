@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import text
 from auth import verify_password, DUMMY_HASH, PH
 from database import audit
-from periods import annual_periods, capacity, validate_block, ACTIVE
+from periods import annual_periods, capacity, validate_block, validate_historical_block, ACTIVE
 
 MONTHS = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
 
@@ -118,8 +118,8 @@ def remaining(c, user):
 
 def validate_dates(start, end, comments, now=None):
     days = (end-start).days+1
-    if start < (now or today()) or not 1 <= days <= 30 or len(comments) > 300:
-        raise ValueError('Fechas inválidas: solicita entre 1 y 30 días calendario, sin fechas pasadas ni comentarios de más de 300 caracteres.')
+    if start < (now or today()) or days not in (15,30) or len(comments) > 300:
+        raise ValueError('Solicita exactamente 15 o 30 días calendario consecutivos, sin fechas pasadas ni comentarios de más de 300 caracteres.')
     return days
 
 
@@ -134,7 +134,7 @@ def reserve(c, user, start, end, days, exclude=0):
         raise ValueError('Ya existe una solicitud pendiente o aprobada para esas fechas.')
 
 
-def request_vacation(engine, session, start, end, comments, period_id=None, block='Flexible', accepts=False):
+def request_vacation(engine, session, start, end, comments, period_id=None, block='Principal', accepts=False):
     days = validate_dates(start,end,comments)
     with engine.begin() as c:
         c.execute(text('SELECT codigo FROM usuarios WHERE codigo=:c FOR UPDATE'), {'c':session['codigo']})
@@ -189,6 +189,9 @@ def change_status(engine, session, ident, expected, status):
                 raise ValueError('Valida el récord vacacional antes de aprobar.')
             if row['modalidad']=='Historica' and today()<p['habilita']:
                 raise ValueError('Una solicitud histórica pendiente antes del año debe reemplazarse por un adelanto válido de 15 días.')
+            if row['modalidad']!='Historica':
+                existing = [dict(r) for r in c.execute(text("SELECT dias,bloque FROM solicitudes WHERE periodo_id=:p AND id<>:id AND estado IN ('Pendiente','Aprobado','Disfrutada')"),{'p':p['id'],'id':ident}).mappings()]
+                validate_block(row['bloque'],row['dias'],existing)
             if not row['acuerdo'].strip():
                 raise ValueError('Registra la referencia del acuerdo escrito antes de aprobar.')
         if status == 'Cancelada' and expected=='Aprobado' and row['fecha_inicio']<=today():
@@ -244,7 +247,7 @@ def assign_historical(engine, session, ident, period_id, block, reason):
         if not p or p['inconsistente']:
             raise ValueError('Período inválido para este colaborador.')
         existing = [dict(r) for r in c.execute(text("SELECT dias,bloque FROM solicitudes WHERE periodo_id=:p AND estado IN ('Pendiente','Aprobado','Disfrutada')"),{'p':period_id}).mappings()]
-        validate_block(block,row['dias'],existing)
+        validate_historical_block(block,row['dias'],existing)
         if row['estado'] in ACTIVE and sum(r['dias'] for r in existing)+row['dias']>30:
             raise ValueError('La conciliación excede los 30 días del período.')
         c.execute(text('UPDATE solicitudes SET periodo_id=:p,bloque=:b,conciliacion_referencia=:r,actualizado_en=NOW() WHERE id=:id'),{'p':period_id,'b':block,'id':ident,'r':reason.strip()})

@@ -26,7 +26,23 @@ def capacity(period, current):
 
 
 def validate_block(block, days, existing):
-    """Keep a principal 15-day block (15 or 7+8) and flexible remainder <=15."""
+    """Company policy: two indivisible 15-day blocks, or one full 30-day rest."""
+    if block not in BLOCKS:
+        raise ValueError('Selecciona un bloque vacacional válido.')
+    if any(r['bloque'] not in BLOCKS or r['dias'] != (30 if r['bloque']=='Completo' else 15) for r in existing):
+        raise ValueError('El período contiene fracciones históricas; RR. HH. debe revisar la excepción antes de nuevas solicitudes.')
+    if block == 'Completo':
+        if days != 30 or existing:
+            raise ValueError('Los 30 días completos requieren un período sin reservas ni uso.')
+        return
+    if days != 15:
+        raise ValueError('Cada bloque requiere exactamente 15 días calendario consecutivos.')
+    if any(r['bloque'] in ('Completo', block) for r in existing) or len(existing) >= 2:
+        raise ValueError('Solo se admite una solicitud activa de 15 días por bloque y dos bloques por período anual.')
+
+
+def validate_historical_block(block, days, existing):
+    """Reconcile earlier fractions without changing their dates or actual days."""
     if block not in BLOCKS:
         raise ValueError('Selecciona un bloque vacacional válido.')
     if any(r['bloque'] == 'Historico' for r in existing):

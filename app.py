@@ -115,7 +115,7 @@ def admin(engine,session):
             service.ensure_periods(c,u)
             summaries[u['codigo']] = service.vacation_summary(c,u)
     st.subheader('Saldo por colaborador y período anual')
-    st.caption('30 días por año de servicio con récord validado. Adelanto de 15 días desde seis meses, sujeto a acuerdo escrito. Los días anteriores se conservan.')
+    st.caption('Política de la empresa: dos bloques de 15 días o 30 días completos por año de servicio, con récord validado. Adelanto de 15 días desde seis meses, sujeto a acuerdo escrito. Los días anteriores se conservan.')
     balances = [{'Código':u['codigo'],'Nombre':u['nombre'],'Activo':u['activo'],
         'Ingreso continuo':u['fecha_ingreso'],'Último período anual habilitado':summaries[u['codigo']]['actual'],
         'Períodos anteriores disponibles':summaries[u['codigo']]['anteriores'],
@@ -238,8 +238,8 @@ def employee(engine,session,user):
         else:
             with st.form('vacaciones',clear_on_submit=True):
                 p=st.selectbox('Período del que se descontarán los días (más antiguo primero)',options,format_func=period_label)
-                block=st.selectbox('Bloque',['Principal','Flexible','Completo'])
-                st.caption('Principal: 15 días seguidos o 7 + 8. Flexible: hasta otros 15 días, en fracciones desde 1 día. Completo: 30 días. Adelanto: 15 días, bloque Principal.')
+                block=st.selectbox('Bloque',['Principal','Flexible','Completo'],format_func=lambda b:{'Principal':'Primer bloque — 15 días','Flexible':'Segundo bloque — 15 días','Completo':'Descanso completo — 30 días'}[b])
+                st.caption('Cada año de servicio: dos bloques de 15 días calendario consecutivos o un descanso de 30 días. Desde los seis meses: adelanto del primer bloque de 15 días. Al cumplir el año y validar el récord: los 15 restantes, o 30 si no hubo adelanto. Requiere acuerdo escrito y aprobación de RR. HH.')
                 start=st.date_input('Fecha de inicio',value=service.today())
                 end=st.date_input('Fecha de fin',value=service.today())
                 comment=st.text_area('Comentarios',max_chars=300)
